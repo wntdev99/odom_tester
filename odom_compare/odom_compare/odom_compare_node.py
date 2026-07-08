@@ -55,8 +55,13 @@ class OdomCompareNode(Node):
         self.declare_parameter('v_ang', 0.3)
         self.declare_parameter('publish_rate', 30.0)
         self.declare_parameter('settle_time', 1.0)
-        self.declare_parameter('reach_tol_lin', 0.02)
-        self.declare_parameter('reach_tol_ang', 0.02)
+        self.declare_parameter('reach_tol_lin', 0.001)   # [m] 도달 허용오차(위치)
+        self.declare_parameter('reach_tol_ang', 0.002)   # [rad] 도달 허용오차(각도)
+        # 목표 근처 최소 속도 — 주기당 이동량이 곧 정지 분해능. 허용오차보다 충분히 작게.
+        self.declare_parameter('v_lin_min', 0.01)        # [m/s] 30Hz → 주기당 ~0.33mm
+        self.declare_parameter('v_ang_min', 0.02)        # [rad/s] 30Hz → 주기당 ~0.038°
+        self.declare_parameter('slowdown_lin', 0.10)     # [m] 감속 시작 남은거리
+        self.declare_parameter('slowdown_ang', 0.10)     # [rad] 감속 시작 남은각도
         self.declare_parameter('max_seg_time', 30.0)
         self.declare_parameter('max_seg_dist', 1.5)
         self.declare_parameter('output_dir', 'results')
@@ -203,6 +208,10 @@ class OdomCompareNode(Node):
             settle_time=self.get_parameter('settle_time').value,
             reach_tol_lin=self.get_parameter('reach_tol_lin').value,
             reach_tol_ang=self.get_parameter('reach_tol_ang').value,
+            v_lin_min=self.get_parameter('v_lin_min').value,
+            v_ang_min=self.get_parameter('v_ang_min').value,
+            slowdown_lin=self.get_parameter('slowdown_lin').value,
+            slowdown_ang=self.get_parameter('slowdown_ang').value,
             max_seg_time=self.get_parameter('max_seg_time').value,
             max_seg_dist=self.get_parameter('max_seg_dist').value,
         )

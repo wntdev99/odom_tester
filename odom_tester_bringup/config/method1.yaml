@@ -17,10 +17,16 @@
     # 속도·타이밍 (swerve_controller 상한: lin 0.8 / ang 1.2, timeout 0.5s)
     v_lin: 0.15             # [m/s]
     v_ang: 0.3              # [rad/s]
-    publish_rate: 30.0      # [Hz]  timeout(0.5s) 대비 충분
+    publish_rate: 30.0      # [Hz]  timeout(0.5s) 대비 충분, 컨트롤러 update_rate와 일치
     settle_time: 1.0        # [s]
-    reach_tol_lin: 0.02     # [m]
-    reach_tol_ang: 0.02     # [rad]
+    # 도달 허용오차 — 정밀 폐합을 위해 타이트하게. 최소속도(아래)와 함께 조여야 함.
+    reach_tol_lin: 0.001    # [m]   1mm
+    reach_tol_ang: 0.002    # [rad] ~0.11°
+    # 목표 근처 최소속도 = 정지 분해능(주기당 이동량). 허용오차보다 작아야 헌팅 안 함.
+    v_lin_min: 0.01         # [m/s]  30Hz → 주기당 ~0.33mm
+    v_ang_min: 0.02         # [rad/s] 30Hz → 주기당 ~0.038°
+    slowdown_lin: 0.10      # [m]   감속 시작 남은거리
+    slowdown_ang: 0.10      # [rad] 감속 시작 남은각도
 
     # 안전 가드
     max_seg_time: 30.0      # [s]
