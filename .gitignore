@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# colcon (혹시 repo 내부에서 빌드할 경우)
+build/
+install/
+log/
+
+# 실험 산출물
+/odom_tests/
+*.bag

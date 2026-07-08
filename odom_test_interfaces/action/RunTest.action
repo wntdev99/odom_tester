@@ -1,0 +1,22 @@
+# run 액션 — 테스트 하나를 실행한다 (장시간·취소 가능).
+# --- Goal ---
+string test             # 실행할 테스트 이름 (list_tests가 알려준 것)
+float64 side_length     # 0이면 config 기본값 사용
+int32   loops           # 0이면 config 기본값 사용
+int32   repeats         # 0이면 config 기본값 사용
+bool    dry_run         # true면 실제 구동 없이 검증만
+---
+# --- Result ---
+bool    success
+string  message
+string  output_path       # 기록 파일/bag 경로
+float64 final_drift_pos   # [m]
+float64 final_drift_yaw   # [rad]
+---
+# --- Feedback ---
+string  phase             # 현재 조건 (square_cw 등)
+int32   current_loop
+int32   total_loops
+string  current_segment   # drive / rotate / strafe / settle
+float64 drift_pos_so_far  # [m]
+float64 drift_yaw_so_far  # [rad]

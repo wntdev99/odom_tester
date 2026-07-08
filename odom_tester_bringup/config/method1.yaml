@@ -1,0 +1,30 @@
+# 방법 ① (odom_compare) 파라미터 — 네임스페이스 /method1
+/method1/odom_compare:
+  ros__parameters:
+    # 인터페이스 (로봇 실측값)
+    cmd_vel_topic: /swerve_controller/cmd_vel
+    odom_a_topic:  /swerve_controller/odom     # 비교 대상 A (swerve 원본)
+    odom_b_topic:  /fused_odom                 # 비교 대상 B (EKF)
+    feedback_source: b                          # 거리/각도 판정에 쓸 odom (a|b) — 측정엔 무영향
+    odom_frame: odom
+    base_frame:  base_footprint
+
+    # 루틴
+    side_length: 1.0        # [m]  1x1
+    loops: 5                # 한 실행의 바퀴 수  (방법①=5)
+    repeats: 1              # 독립 실행 횟수     (방법①=1)
+
+    # 속도·타이밍 (swerve_controller 상한: lin 0.8 / ang 1.2, timeout 0.5s)
+    v_lin: 0.15             # [m/s]
+    v_ang: 0.3              # [rad/s]
+    publish_rate: 30.0      # [Hz]  timeout(0.5s) 대비 충분
+    settle_time: 1.0        # [s]
+    reach_tol_lin: 0.02     # [m]
+    reach_tol_ang: 0.02     # [rad]
+
+    # 안전 가드
+    max_seg_time: 30.0      # [s]
+    max_seg_dist: 1.5       # [m]
+
+    # 출력
+    output_dir: ~/odom_tests

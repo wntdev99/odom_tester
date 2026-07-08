@@ -1,0 +1,6 @@
+# info 서비스 — 실행 가능한 테스트 목록을 조회한다.
+# Request: 없음
+---
+string[] tests            # 실행 가능한 테스트 이름 (예: square_cw, square_ccw, strafe_square, full)
+string[] descriptions     # 각 테스트 설명
+string[] default_params   # 각 테스트 기본 파라미터 요약(문자열)

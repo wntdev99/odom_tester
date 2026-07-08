@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>odom_tester</name>
+  <version>0.0.1</version>
+  <description>오도메트리 정확도 측정 패키지 묶음 (메타패키지).</description>
+  <maintainer email="james@example.com">james</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>odom_test_interfaces</exec_depend>
+  <exec_depend>odom_test_core</exec_depend>
+  <exec_depend>odom_compare</exec_depend>
+  <exec_depend>odom_tester_bringup</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
