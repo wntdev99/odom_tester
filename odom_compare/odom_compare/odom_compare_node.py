@@ -64,7 +64,8 @@ class OdomCompareNode(Node):
         gp = self.get_parameter
         self._cmd_topic = gp('cmd_vel_topic').value
         self._fb_src = gp('feedback_source').value
-        self._output_dir = gp('output_dir').value
+        # config YAML의 "~/..." 는 문자열이라 tilde가 확장되지 않는다 → 여기서 확장.
+        self._output_dir = os.path.expanduser(gp('output_dir').value)
 
         # --- I/O ---
         self._pub = self.create_publisher(Twist, self._cmd_topic, 10)
