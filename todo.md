@@ -45,11 +45,14 @@
 | 방법 | 패키지 | 진실(truth) 출처 | 재는 것 | 상태 |
 |---|---|---|---|---|
 | **① 상대 비교** | `odom_compare` | 없음 | swerve↔fused **상호 불일치** (절대 정확도 아님) | **구현·실주행 검증됨** |
+| **④ MCL 잔차** | `odom_mcl` | `/mcl_pose` (부분·순환) | **운영 위치오차 (준-절대)** | **코드 구현됨, 실주행 미착수** |
 | **② UMBmark + 테이프** | `odom_umbmark` (미생성) | 자로 잰 물리 시작/끝 | **계통오차 분리·보정계수** (끝점) | 미착수 |
 | **③ AprilTag GT** | `odom_apriltag_gt` (미생성) | 천장 카메라 궤적 | **절대 오차(경로 전체)** | 미착수 |
 
-세 방법은 보완 관계: ①=싼 상시 감시, ②=장비 없이 계통오차+보정, ③=경로 전체 절대 진실.
-②→③ 순으로 정교해지고 ③가 ②를 검증. **①은 절대 정확도를 못 잡음이 구조적으로 확정**(EKF 앵커).
+네 방법은 보완 관계: ①=싼 상시 감시, ④=장비 없이 준-절대 감시(맵+라이다), ②=장비 없이
+계통오차+보정, ③=경로 전체 절대 진실. ②→③ 순으로 정교해지고 ③가 ②·④를 검증.
+**①은 절대 정확도를 못 잡음이 구조적으로 확정**(EKF 앵커). **④도 MCL이 odom을 모션모델로 쓰는
+순환성 탓 원시 odom 오차를 과소평가** — 독립 GT(③)가 최종 판정. (상세: `docs/method-4-mcl-reference.md`)
 
 ## 4. 리포지토리 구조 (메타패키지)
 
@@ -58,9 +61,12 @@ odom_tester/                 ← 메타패키지 (ament_cmake, exec_depend만)
 odom_test_interfaces/        ← ListTests.srv + RunTest.action (세 방법 공유)
 odom_test_core/              ← pose_utils.py(재영점·yaw·wrap), primitives.py(drive/strafe/rotate)
 odom_compare/                ← 방법 ① 노드 (info 서비스 + run 액션, /method1 네임스페이스)
-odom_tester_bringup/         ← config/method1.yaml + launch/method1.launch.py
+odom_mcl/                    ← 방법 ④ 노드 (MCL 잔차, /method4 네임스페이스)
+odom_tester_bringup/         ← config/method{1,4}.yaml + launch/method{1,4}.launch.py
 scripts/analyze_method1.py   ← CSV → 드리프트 곡선·XY 오버레이 (matplotlib, ROS 비의존)
 docs/method-1-relative-comparison.md  ← 방법 ① 상세 명세
+docs/method-4-mcl-reference.md        ← 방법 ④ 상세 명세
+conclusion/                  ← 방법별 실주행 결론 모음 (README 인덱스 + method-N-conclusion.md)
 results/                     ← 실험 산출물 (gitignore, 커밋 안 됨)
 ```
 - 원격: `github.com/wntdev99/odom_tester` (branch `main`).
@@ -94,6 +100,10 @@ results/                     ← 실험 산출물 (gitignore, 커밋 안 됨)
 
 ### 개발 (다른 에이전트 담당 — 오프라인)
 - [ ] **방법 ① 분석 강화**: 조건별(cw/ccw/strafe) 비교, 폐루프 잔차(자기 odom) 분리 표기, 통계 요약 리포트.
+- [x] **방법 ④ `odom_mcl` 패키지 생성**: `/method4`, MCL(`/mcl_pose`) 기준 잔차. 코어 재사용,
+  SE(2) 시작정렬(`pose_utils.compose/inverse/align_transform`), 공분산 게이팅, gt_topic/gt_type 파라미터화.
+  - [ ] `scripts/analyze_method4.py`(잔차 곡선·snap-back·품질 게이팅 반영), evo TUM 내보내기.
+  - [ ] **`/mcl_pose` 실제 토픽·타입 확인**(읽기 전용 조회) 후 `method4.yaml`의 `gt_topic`/`gt_type` 확정.
 - [ ] **방법 ② `odom_umbmark` 패키지 생성**: 코어 명령기 재사용. `umbmark_cw/ccw` 러너, **테이프 실측 입력**(CLI/CSV), UMBmark 분석기(무게중심, `E_max,syst`, Type A/B 분해 → 보정계수). `loops=1, repeats=5` 양방향. `/method2` 네임스페이스, 같은 info/run 인터페이스.
 - [ ] **방법 ③ `odom_apriltag_gt` 패키지 생성**: `christianrauch/apriltag_ros`(`apt install ros-jazzy-apriltag-ros`), `tag36h11`, 바닥 기준 태그(월드 원점), `image_proc` rectify, intrinsic 캘리브레이션. GT pose 발행 + rosbag + evo(ATE/RPE) 어댑터. `/method3`.
 - [ ] **evo 연동**: /odom·/fused_odom·GT를 TUM/bag으로 저장→evo_ape/rpe(2D는 `-s` 원점정렬).
@@ -104,6 +114,7 @@ results/                     ← 실험 산출물 (gitignore, 커밋 안 됨)
 ### 테스트 = 실주행 (오케스트레이터 담당, 사용자 허락 필요) — **개발 에이전트는 하지 말 것**
 - [ ] 타이트 허용오차(1mm/0.11°)로 재주행 → 비폐합(핀휠) 개선 확인. 헌팅하면 `reach_tol`·`v_min` 재조정.
 - [ ] 방법 ① 완성: `square_ccw` 5바퀴 + `strafe_square` 실주행·분석.
+- [ ] 방법 ④ 실측: `/mcl_pose` 확인·로컬라이제이션 수렴 상태에서 feature-rich 공간 주행·분석.
 - [ ] 방법 ②·③ 실측(패키지 완성 후).
 
 ### 로봇 측 (사용자/관리자, 별도 승인)

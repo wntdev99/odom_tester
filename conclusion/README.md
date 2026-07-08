@@ -11,6 +11,7 @@
 | 방법 | 문서 | 상태 | 한줄 결론 |
 |---|---|---|---|
 | ① 상대 비교 (`odom_compare`) | [`method-1-conclusion.md`](method-1-conclusion.md) | ✅ 1차 완료 | 저속·직진에선 `fused ≈ swerve` → 방법 ①은 절대 정확도 판정 불가(구조적 확정), GT 필요 |
+| ④ MCL 잔차 (`odom_mcl`) | _미작성_ | 🛠 코드 구현·실주행 미착수 | — (설계: [`../docs/method-4-mcl-reference.md`](../docs/method-4-mcl-reference.md)) |
 | ② UMBmark + 테이프 (`odom_umbmark`) | _미작성_ | ⬜ 미착수 | — |
 | ③ AprilTag GT (`odom_apriltag_gt`) | _미작성_ | ⬜ 미착수 | — |
 

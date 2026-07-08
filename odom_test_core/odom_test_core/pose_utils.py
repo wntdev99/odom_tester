@@ -45,3 +45,42 @@ def rezero(pose: Pose2D, start: Pose2D) -> Pose2D:
 
 def planar_distance(a: Pose2D, b: Pose2D) -> float:
     return math.hypot(a.x - b.x, a.y - b.y)
+
+
+def pose2d_from_pose(pos, ori) -> Pose2D:
+    """geometry_msgs Point + Quaternion → Pose2D.
+
+    PoseStamped/PoseWithCovarianceStamped 등 Odometry가 아닌 메시지용
+    (mcl_pose 처럼 타입이 다를 수 있는 GT 소스, method-4 문서 §1).
+    """
+    return Pose2D(pos.x, pos.y, yaw_from_quaternion(ori.x, ori.y, ori.z, ori.w))
+
+
+def compose(a: Pose2D, b: Pose2D) -> Pose2D:
+    """SE(2) 합성 a ∘ b — a 프레임 기준으로 b를 얹는다."""
+    c, s = math.cos(a.yaw), math.sin(a.yaw)
+    return Pose2D(
+        x=a.x + c * b.x - s * b.y,
+        y=a.y + s * b.x + c * b.y,
+        yaw=wrap_angle(a.yaw + b.yaw),
+    )
+
+
+def inverse(p: Pose2D) -> Pose2D:
+    """SE(2) 역변환 — compose(p, inverse(p)) == identity."""
+    c, s = math.cos(p.yaw), math.sin(p.yaw)
+    return Pose2D(
+        x=-(c * p.x + s * p.y),
+        y=-(-s * p.x + c * p.y),
+        yaw=-p.yaw,
+    )
+
+
+def align_transform(ref_start: Pose2D, src_start: Pose2D) -> Pose2D:
+    """t0에 두 pose가 같은 물리 자세라고 보고 src→ref 강체 변환을 구한다.
+
+    프레임이 다른 두 궤적(예: map의 mcl_pose vs odom의 odometry)을 시작 시점에
+    정렬한다(method-4 문서 §7, evo의 원점정렬 -s 와 동일). 반환값 T로
+    `compose(T, src(t))` 하면 src 궤적이 ref 프레임으로 옮겨진다.
+    """
+    return compose(ref_start, inverse(src_start))

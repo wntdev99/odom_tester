@@ -12,6 +12,7 @@
   <exec_depend>odom_test_interfaces</exec_depend>
   <exec_depend>odom_test_core</exec_depend>
   <exec_depend>odom_compare</exec_depend>
+  <exec_depend>odom_mcl</exec_depend>
   <exec_depend>odom_tester_bringup</exec_depend>
 
   <export>

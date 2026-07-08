@@ -1,0 +1,45 @@
+# 방법 ④ (odom_mcl) 파라미터 — 네임스페이스 /method4
+# MCL(mcl_pose) 기준 오도메트리 잔차. 순환성 주의 — 독립 GT 아님(문서 method-4 §0).
+/method4/odom_mcl:
+  ros__parameters:
+    # 인터페이스
+    cmd_vel_topic: /swerve_controller/cmd_vel
+    odom_a_topic:  /swerve_controller/odom     # 검사 대상 A (swerve 원본)
+    odom_b_topic:  /fused_odom                 # 검사 대상 B (EKF)
+    # ↓↓↓ 로컬라이제이션 소스 — 로봇에서 실제 토픽·타입 확인 후 여기만 수정(문서 §1,§11)
+    gt_topic:      /mcl_pose
+    gt_type:       pose_with_cov               # pose_with_cov | odom | pose
+    # ↑↑↑
+    feedback_source: b                          # 주행 제어용 odom (a|b) — MCL 아님
+    map_frame:  map
+    odom_frame: odom
+    base_frame: base_footprint
+
+    # 품질 게이팅 (MCL 신뢰 구간만 채택 — 초과 시 품질 플래그 0)
+    max_cov_pos: 0.05        # [m^2]  위치 분산 상한
+    max_cov_yaw: 0.02        # [rad^2] yaw 분산 상한
+    gt_timeout:  1.0         # [s]    mcl_pose 갱신 끊김 허용
+
+    # 루틴 (방법①과 동일 preset)
+    side_length: 1.0        # [m]
+    loops: 5
+    repeats: 1
+
+    # 속도·타이밍 (swerve_controller 상한: lin 0.8 / ang 1.2, timeout 0.5s)
+    v_lin: 0.15
+    v_ang: 0.3
+    publish_rate: 30.0
+    settle_time: 1.5        # [s] MCL 안정화 위해 방법①(1.0)보다 길게
+    reach_tol_lin: 0.001    # [m]   1mm
+    reach_tol_ang: 0.002    # [rad] ~0.11°
+    v_lin_min: 0.01
+    v_ang_min: 0.02
+    slowdown_lin: 0.10
+    slowdown_ang: 0.10
+
+    # 안전 가드
+    max_seg_time: 30.0
+    max_seg_dist: 1.5
+
+    # 출력 (상대경로면 CWD 기준, .gitignore 대상 results/)
+    output_dir: results
