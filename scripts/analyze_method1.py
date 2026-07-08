@@ -17,9 +17,9 @@ CSV 형식:
     - (x,y)[m], yaw[rad], drift_pos[m], drift_yaw[rad]
 
 사용법:
-    python3 analyze_method1.py --input ~/odom_tests
-    python3 analyze_method1.py --input ~/odom_tests/square_cw_rep0_XXXX.csv
-    python3 analyze_method1.py --input ~/odom_tests --output ~/odom_tests/plots
+    python3 analyze_method1.py --input results
+    python3 analyze_method1.py --input results/square_cw_rep0_XXXX.csv
+    python3 analyze_method1.py --input results --output results/plots
 
 옵션:
     --input   CSV 파일 또는 디렉토리(디렉토리면 *.csv 전부). 기본 ~/odom_tests
@@ -225,8 +225,8 @@ def collect_inputs(input_path):
 def main():
     parser = argparse.ArgumentParser(
         description="방법 ①(odom_compare) CSV 드리프트 분석·시각화")
-    parser.add_argument("--input", default="~/odom_tests",
-                        help="CSV 파일 또는 디렉토리 (기본: ~/odom_tests)")
+    parser.add_argument("--input", default="results",
+                        help="CSV 파일 또는 디렉토리 (기본: results, CWD 기준)")
     parser.add_argument("--output", default=None,
                         help="PNG 저장 디렉토리 (기본: 입력 옆 plots/)")
     args = parser.parse_args()

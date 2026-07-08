@@ -59,13 +59,14 @@ class OdomCompareNode(Node):
         self.declare_parameter('reach_tol_ang', 0.02)
         self.declare_parameter('max_seg_time', 30.0)
         self.declare_parameter('max_seg_dist', 1.5)
-        self.declare_parameter('output_dir', os.path.expanduser('~/odom_tests'))
+        self.declare_parameter('output_dir', 'results')
 
         gp = self.get_parameter
         self._cmd_topic = gp('cmd_vel_topic').value
         self._fb_src = gp('feedback_source').value
-        # config YAML의 "~/..." 는 문자열이라 tilde가 확장되지 않는다 → 여기서 확장.
-        self._output_dir = os.path.expanduser(gp('output_dir').value)
+        # 상대경로면 실행 위치(CWD) 기준 절대경로로 해석, "~"도 확장.
+        # 결과는 프로젝트 로컬(예: repo의 results/, .gitignore 대상)에 저장.
+        self._output_dir = os.path.abspath(os.path.expanduser(gp('output_dir').value))
 
         # --- I/O ---
         self._pub = self.create_publisher(Twist, self._cmd_topic, 10)

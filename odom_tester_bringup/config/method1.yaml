@@ -26,5 +26,5 @@
     max_seg_time: 30.0      # [s]
     max_seg_dist: 1.5       # [m]
 
-    # 출력
-    output_dir: ~/odom_tests
+    # 출력 — 상대경로면 실행(CWD) 기준. 프로젝트 로컬(results/, .gitignore 대상) 권장.
+    output_dir: results
