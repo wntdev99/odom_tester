@@ -13,3 +13,6 @@ log/
 results/
 odom_tests/
 *.bag
+
+# archive: 큐레이션 실험은 커밋하되, plots는 analyze 스크립트로 재생성 가능하므로 제외
+archive/**/plots/
