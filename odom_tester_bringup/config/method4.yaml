@@ -43,3 +43,4 @@
 
     # 출력 (상대경로면 CWD 기준, .gitignore 대상 results/)
     output_dir: results
+    record_tum: true        # full-rate 궤적(odom_a/odom_b/mcl) TUM 저장 → evo 입력

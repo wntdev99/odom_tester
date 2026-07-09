@@ -63,8 +63,10 @@ odom_test_core/              ← pose_utils.py(재영점·yaw·wrap), primitives
 odom_compare/                ← 방법 ① 노드 (info 서비스 + run 액션, /method1 네임스페이스)
 odom_mcl/                    ← 방법 ④ 노드 (MCL 잔차, /method4 네임스페이스)
 odom_tester_bringup/         ← config/method{1,4}.yaml + launch/method{1,4}.launch.py
-scripts/analyze_method1.py   ← 방법① CSV → 드리프트 곡선·XY 오버레이 (matplotlib, ROS 비의존)
+odom_test_core/…/recorder.py ← full-rate 궤적 레코더(TUM 저장), 세 방법 공유
+scripts/analyze_method1.py   ← 방법① CSV → 드리프트·비폐합 곡선·CW/CCW·요약 리포트 (ROS 비의존)
 scripts/analyze_method4.py   ← 방법④ CSV → MCL 잔차 곡선·품질 게이팅·XY 오버레이 (ROS 비의존)
+scripts/run_evo.py           ← TUM 세트 → evo_ape/rpe 래퍼 (ROS 비의존)
 docs/method-1-relative-comparison.md  ← 방법 ① 상세 명세
 docs/method-4-mcl-reference.md        ← 방법 ④ 상세 명세
 conclusion/                  ← 방법별 실주행 결론 모음 (README 인덱스 + method-N-conclusion.md)
@@ -107,12 +109,16 @@ results/                     ← 실험 산출물 (gitignore, 커밋 안 됨)
   SE(2) 시작정렬(`pose_utils.compose/inverse/align_transform`), 공분산 게이팅, gt_topic/gt_type 파라미터화.
   - [x] `scripts/analyze_method4.py`: 잔차 곡선(A/B, pos/yaw)·품질 게이팅 표시·바퀴당 증가율·map
     프레임 XY 오버레이. 합성 CSV로 end-to-end 검증됨.
-  - [ ] **evo TUM 내보내기 + 진짜 snap-back**: 현재 CSV는 바퀴당 체크포인트라 evo·snap-back엔
-    부족 → 노드에 **full-rate 궤적 로깅(timestamp 포함)** 추가가 선행 과제.
+  - [x] **full-rate 궤적 로깅**: `odom_test_core/recorder.py`(TrajectoryRecorder, TUM 저장) 추가,
+    노드가 실행마다 시리즈별 `*.tum`(odom_a/odom_b/mcl) 저장(`record_tum` 파라미터). 유닛 검증됨.
+  - [ ] (선택) **진짜 snap-back 분석**: 이제 full-rate TUM 이 있으므로 보정 사이 누적 odom 오차
+    급감폭을 TUM 에서 추출하는 분석 추가 가능(analyze_method4 확장).
   - [ ] **`/mcl_pose` 실제 토픽·타입 확인**(읽기 전용 조회) 후 `method4.yaml`의 `gt_topic`/`gt_type` 확정.
 - [ ] **방법 ② `odom_umbmark` 패키지 생성**: 코어 명령기 재사용. `umbmark_cw/ccw` 러너, **테이프 실측 입력**(CLI/CSV), UMBmark 분석기(무게중심, `E_max,syst`, Type A/B 분해 → 보정계수). `loops=1, repeats=5` 양방향. `/method2` 네임스페이스, 같은 info/run 인터페이스.
 - [ ] **방법 ③ `odom_apriltag_gt` 패키지 생성**: `christianrauch/apriltag_ros`(`apt install ros-jazzy-apriltag-ros`), `tag36h11`, 바닥 기준 태그(월드 원점), `image_proc` rectify, intrinsic 캘리브레이션. GT pose 발행 + rosbag + evo(ATE/RPE) 어댑터. `/method3`.
-- [ ] **evo 연동**: /odom·/fused_odom·GT를 TUM/bag으로 저장→evo_ape/rpe(2D는 `-s` 원점정렬).
+- [x] **evo 연동**: 노드가 TUM 저장(위 full-rate 로깅) + `scripts/run_evo.py`(TUM 세트 자동
+  그룹핑 → `evo_ape`/`evo_rpe`, `--align_origin` 기본, evo 미설치 시 명령만 출력·`--dry-run`).
+  방법④는 mcl 기준, 방법①은 fused 기준. dry-run 그룹핑 검증됨.
 - [ ] **자이로 바이어스 로거**: 정지/직진/급회전 시 `/imu`(gyro z)·wheel yaw·fused yaw 동시 로깅·비교 툴(방법① 확장 or 별도). (로깅 코드는 개발, 실행은 오케스트레이터)
 - [ ] **문서**: 방법 ②·③ 명세를 `docs/`에 방법 ①과 같은 형식으로.
 - [ ] (선택) RViz 설정·PlotJuggler 레이아웃을 `odom_tester_bringup`에 추가.

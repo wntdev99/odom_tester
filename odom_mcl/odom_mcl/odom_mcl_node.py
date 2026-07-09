@@ -32,6 +32,7 @@ from odom_test_core.pose_utils import (
 from odom_test_core.primitives import (
     MotionParams, MotionPrimitives, SegmentAborted, SegmentGuardTripped,
 )
+from odom_test_core.recorder import TrajectoryRecorder, stamp_to_sec
 
 HALF_PI = math.pi / 2.0
 
@@ -108,6 +109,7 @@ class OdomMclNode(Node):
         self.declare_parameter('max_seg_time', 30.0)
         self.declare_parameter('max_seg_dist', 1.5)
         self.declare_parameter('output_dir', 'results')
+        self.declare_parameter('record_tum', True)   # full-rate 궤적(evo용) 기록
 
         gp = self.get_parameter
         self._cmd_topic = gp('cmd_vel_topic').value
@@ -116,6 +118,8 @@ class OdomMclNode(Node):
         self._max_cov_yaw = gp('max_cov_yaw').value
         self._gt_timeout = gp('gt_timeout').value
         self._output_dir = os.path.abspath(os.path.expanduser(gp('output_dir').value))
+        self._record_tum = gp('record_tum').value
+        self._recorder = TrajectoryRecorder()
 
         # --- I/O ---
         self._pub = self.create_publisher(Twist, self._cmd_topic, 10)
@@ -129,12 +133,10 @@ class OdomMclNode(Node):
         self._align_b = None
 
         self.create_subscription(
-            Odometry, gp('odom_a_topic').value,
-            lambda m: setattr(self, '_pose_a', pose2d_from_odom(m)),
+            Odometry, gp('odom_a_topic').value, self._on_odom_a,
             20, callback_group=self._cbg)
         self.create_subscription(
-            Odometry, gp('odom_b_topic').value,
-            lambda m: setattr(self, '_pose_b', pose2d_from_odom(m)),
+            Odometry, gp('odom_b_topic').value, self._on_odom_b,
             20, callback_group=self._cbg)
 
         gt_type = gp('gt_type').value
@@ -160,12 +162,25 @@ class OdomMclNode(Node):
         self.get_logger().info(
             f'odom_mcl 준비됨 (gt_topic={gp("gt_topic").value}, gt_type={gt_type})')
 
-    # ------- GT 콜백 -------
+    # ------- 구독 콜백 (pose 갱신 + full-rate 기록) -------
+    def _on_odom_a(self, msg):
+        p = pose2d_from_odom(msg)
+        self._pose_a = p
+        self._recorder.add('odom_a', stamp_to_sec(msg.header.stamp), p.x, p.y, p.yaw)
+
+    def _on_odom_b(self, msg):
+        p = pose2d_from_odom(msg)
+        self._pose_b = p
+        self._recorder.add('odom_b', stamp_to_sec(msg.header.stamp), p.x, p.y, p.yaw)
+
     def _on_gt(self, msg):
         pose, cov = self._gt_extract(msg)
         self._gt = pose
         self._gt_cov = cov
         self._gt_stamp = time.monotonic()
+        stamp = msg.header.stamp if hasattr(msg, 'header') else None
+        if stamp is not None:
+            self._recorder.add('mcl', stamp_to_sec(stamp), pose.x, pose.y, pose.yaw)
 
     def _gt_quality_ok(self):
         """MCL 신뢰 구간인지: 최신 수신 + 공분산 임계 이하."""
@@ -251,7 +266,8 @@ class OdomMclNode(Node):
 
     # ------- 조건별 실행 -------
     def _run_condition(self, cond, gh, prim, loops, L, rep):
-        writer, fh = self._open_csv(cond, rep)
+        stamp = time.strftime('%Y%m%d_%H%M%S')
+        writer, fh = self._open_csv(cond, rep, stamp)
         # 시작 시점 정렬(문서 §7): odom(t)를 map 프레임으로 옮기는 고정 변환.
         start_gt = self._gt
         self._align_a = align_transform(start_gt, self._pose_a)
@@ -259,6 +275,8 @@ class OdomMclNode(Node):
         if not self._gt_quality_ok():
             self.get_logger().warn(
                 f'[{cond}] 시작 시 MCL 공분산/신선도 미달 — 정렬 기준 신뢰 낮음(품질 플래그 기록)')
+        if self._record_tum:
+            self._recorder.start(['odom_a', 'odom_b', 'mcl'])
         try:
             for loop in range(loops):
                 if cond == 'square_cw':
@@ -270,6 +288,20 @@ class OdomMclNode(Node):
                 self._log_checkpoint(writer, cond, loop)
         finally:
             fh.close()
+            if self._record_tum:
+                self._recorder.stop()
+                self._write_tum(cond, rep, stamp)
+
+    def _write_tum(self, cond, rep, stamp):
+        """세 시리즈를 TUM 으로 저장(evo_ape/rpe 입력, 문서 §8)."""
+        for name in ('odom_a', 'odom_b', 'mcl'):
+            path = os.path.join(
+                self._output_dir, f'm4_{cond}_rep{rep}_{stamp}_{name}.tum')
+            written, n = self._recorder.write_tum(name, path)
+            if written:
+                self.get_logger().info(f'TUM 기록: {written} ({n} 샘플)')
+            else:
+                self.get_logger().warn(f'TUM {name}: 샘플 없음 — 토픽 수신 확인')
 
     def _square(self, gh, prim, L, sign, loop, loops, cond):
         for _ in range(4):
@@ -348,9 +380,8 @@ class OdomMclNode(Node):
         fb.drift_yaw_so_far = e_yaw
         gh.publish_feedback(fb)
 
-    def _open_csv(self, cond, rep):
+    def _open_csv(self, cond, rep, stamp):
         os.makedirs(self._output_dir, exist_ok=True)
-        stamp = time.strftime('%Y%m%d_%H%M%S')
         path = os.path.join(self._output_dir, f'm4_{cond}_rep{rep}_{stamp}.csv')
         fh = open(path, 'w', newline='')
         w = csv.writer(fh)

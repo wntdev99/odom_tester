@@ -34,3 +34,4 @@
 
     # 출력 — 상대경로면 실행(CWD) 기준. 프로젝트 로컬(results/, .gitignore 대상) 권장.
     output_dir: results
+    record_tum: true        # full-rate 궤적(swerve/fused) TUM 저장 → evo 입력

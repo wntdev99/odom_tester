@@ -174,7 +174,11 @@
   바퀴별 체크포인트 + **품질 플래그**(공분산 게이팅 통과 여부).
 - **요약**: 종료 시점 잔차, 미터당·회전당 잔차율, 조건별(cw/ccw/strafe) 비교,
   **snap-back 통계**(구간 내 잔차 증가폭 ≈ 보정 사이 누적 odom 오차 — 순환성의 부산물).
-- **evo 연동**: odom·mcl을 TUM으로 저장 → `evo_ape`(2D는 `-s` 원점정렬). (TODO의 evo 계획과 합류)
+- **full-rate TUM + evo**: `record_tum: true`면 실행마다 `*_odom_a.tum`·`*_odom_b.tum`·`*_mcl.tum`
+  (전 구간 궤적, 원본 타임스탬프)을 저장한다. `scripts/run_evo.py`가 세트를 묶어 **mcl 기준**으로
+  `evo_ape`/`evo_rpe`를 돌린다(기본 `--align_origin` — 노드 시작정렬과 같은 관점, scale `-s`는
+  오도메트리 스케일오차를 지우므로 미사용). 체크포인트 CSV(요약)와 별개의 연속 궤적이라 evo·(추후)
+  snap-back 분석의 입력이 된다.
 
 ---
 
@@ -211,6 +215,7 @@
 ## 12. 관련 패키지
 
 - `odom_test_interfaces` — `ListTests.srv`, `RunTest.action` (공유).
-- `odom_test_core` — `drive/strafe/rotate` 프리미티브 + `pose_utils`(SE(2) `compose/inverse` 추가).
+- `odom_test_core` — `drive/strafe/rotate` 프리미티브 + `pose_utils`(SE(2) `compose/inverse`) +
+  `recorder`(full-rate TUM 저장, 세 방법 공유).
 - `odom_mcl` — 방법 ④ 구현. `/method4` 네임스페이스로 info 서비스 + run 액션.
 - `odom_tester_bringup` — `config/method4.yaml` + `launch/method4.launch.py`.

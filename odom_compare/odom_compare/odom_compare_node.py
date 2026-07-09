@@ -27,6 +27,7 @@ from odom_test_core.pose_utils import Pose2D, pose2d_from_odom, wrap_angle
 from odom_test_core.primitives import (
     MotionParams, MotionPrimitives, SegmentAborted, SegmentGuardTripped,
 )
+from odom_test_core.recorder import TrajectoryRecorder, stamp_to_sec
 
 HALF_PI = math.pi / 2.0
 
@@ -65,6 +66,7 @@ class OdomCompareNode(Node):
         self.declare_parameter('max_seg_time', 30.0)
         self.declare_parameter('max_seg_dist', 1.5)
         self.declare_parameter('output_dir', 'results')
+        self.declare_parameter('record_tum', True)   # full-rate 궤적(evo용) 기록
 
         gp = self.get_parameter
         self._cmd_topic = gp('cmd_vel_topic').value
@@ -72,18 +74,18 @@ class OdomCompareNode(Node):
         # 상대경로면 실행 위치(CWD) 기준 절대경로로 해석, "~"도 확장.
         # 결과는 프로젝트 로컬(예: repo의 results/, .gitignore 대상)에 저장.
         self._output_dir = os.path.abspath(os.path.expanduser(gp('output_dir').value))
+        self._record_tum = gp('record_tum').value
+        self._recorder = TrajectoryRecorder()
 
         # --- I/O ---
         self._pub = self.create_publisher(Twist, self._cmd_topic, 10)
         self._pose_a = None
         self._pose_b = None
         self.create_subscription(
-            Odometry, gp('odom_a_topic').value,
-            lambda m: setattr(self, '_pose_a', pose2d_from_odom(m)),
+            Odometry, gp('odom_a_topic').value, self._on_odom_a,
             20, callback_group=self._cbg)
         self.create_subscription(
-            Odometry, gp('odom_b_topic').value,
-            lambda m: setattr(self, '_pose_b', pose2d_from_odom(m)),
+            Odometry, gp('odom_b_topic').value, self._on_odom_b,
             20, callback_group=self._cbg)
 
         # --- 서비스 / 액션 ---
@@ -99,6 +101,17 @@ class OdomCompareNode(Node):
             callback_group=self._cbg)
 
         self.get_logger().info('odom_compare 준비됨 (list_tests 서비스, run_test 액션)')
+
+    # ------- 구독 콜백 (pose 갱신 + full-rate 기록) -------
+    def _on_odom_a(self, msg):
+        p = pose2d_from_odom(msg)
+        self._pose_a = p
+        self._recorder.add('swerve', stamp_to_sec(msg.header.stamp), p.x, p.y, p.yaw)
+
+    def _on_odom_b(self, msg):
+        p = pose2d_from_odom(msg)
+        self._pose_b = p
+        self._recorder.add('fused', stamp_to_sec(msg.header.stamp), p.x, p.y, p.yaw)
 
     # ------- info 서비스 -------
     def _on_list_tests(self, request, response):
@@ -167,9 +180,12 @@ class OdomCompareNode(Node):
 
     # ------- 조건별 실행 -------
     def _run_condition(self, cond, gh, prim, loops, L, rep):
-        writer, fh = self._open_csv(cond, rep)
+        stamp = time.strftime('%Y%m%d_%H%M%S')
+        writer, fh = self._open_csv(cond, rep, stamp)
         start_a = self._pose_a
         start_b = self._pose_b
+        if self._record_tum:
+            self._recorder.start(['swerve', 'fused'])
         try:
             for loop in range(loops):
                 if cond == 'square_cw':
@@ -181,6 +197,20 @@ class OdomCompareNode(Node):
                 self._log_checkpoint(writer, start_a, start_b, cond, loop)
         finally:
             fh.close()
+            if self._record_tum:
+                self._recorder.stop()
+                self._write_tum(cond, rep, stamp)
+
+    def _write_tum(self, cond, rep, stamp):
+        """swerve·fused 궤적을 TUM 으로 저장(evo 입력)."""
+        for name in ('swerve', 'fused'):
+            path = os.path.join(
+                self._output_dir, f'{cond}_rep{rep}_{stamp}_{name}.tum')
+            written, n = self._recorder.write_tum(name, path)
+            if written:
+                self.get_logger().info(f'TUM 기록: {written} ({n} 샘플)')
+            else:
+                self.get_logger().warn(f'TUM {name}: 샘플 없음 — 토픽 수신 확인')
 
     def _square(self, gh, prim, L, sign, loop, loops, cond):
         for _ in range(4):
@@ -251,10 +281,8 @@ class OdomCompareNode(Node):
         fb.drift_yaw_so_far = d_yaw
         gh.publish_feedback(fb)
 
-    def _open_csv(self, cond, rep):
+    def _open_csv(self, cond, rep, stamp):
         os.makedirs(self._output_dir, exist_ok=True)
-        # 실행 시각으로 파일명 (런타임이므로 time 사용 가능)
-        stamp = time.strftime('%Y%m%d_%H%M%S')
         path = os.path.join(self._output_dir, f'{cond}_rep{rep}_{stamp}.csv')
         fh = open(path, 'w', newline='')
         w = csv.writer(fh)
