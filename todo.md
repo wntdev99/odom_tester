@@ -42,6 +42,9 @@
 
 ## 3. 논의한 세 가지 측정 방법
 
+> 네 방법이 어떻게 서로에게 가치를 넘기는지의 예상 흐름은
+> [`docs/measurement-strategy-roadmap.md`](docs/measurement-strategy-roadmap.md) 참조.
+
 | 방법 | 패키지 | 진실(truth) 출처 | 재는 것 | 상태 |
 |---|---|---|---|---|
 | **① 상대 비교** | `odom_compare` | 없음 | swerve↔fused **상호 불일치** (절대 정확도 아님) | **구현·실주행 검증됨** |
