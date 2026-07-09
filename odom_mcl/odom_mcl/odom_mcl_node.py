@@ -36,6 +36,10 @@ from odom_test_core.recorder import TrajectoryRecorder, stamp_to_sec
 
 HALF_PI = math.pi / 2.0
 
+
+class StartAlignmentBad(Exception):
+    """조건 시작 시 MCL 품질(공분산/신선도) 미달 — 시작 정렬 기준 신뢰 불가."""
+
 TESTS = {
     'square_cw':     '1x1 정사각형, 코너 90° 시계방향 회전 (누적 +회전)',
     'square_ccw':    '1x1 정사각형, 코너 90° 반시계방향 회전 (누적 -회전)',
@@ -230,6 +234,13 @@ class OdomMclNode(Node):
             gt_topic = self.get_parameter('gt_topic').value
             result.message = f'{gt_topic} 수신 전 — MCL(로컬라이제이션)이 발행 중인지 확인'
             return result
+        # 시작 정렬 기준이 신뢰 불가하면 잔차 전체가 무의미 → 시작 전에 fail-fast.
+        if not self._gt_quality_ok():
+            goal_handle.abort()
+            result.success = False
+            result.message = ('MCL 품질 미달(공분산/신선도) — 로컬라이제이션 수렴(저공분산) '
+                              '후 재시도. 시작 정렬 기준 신뢰 불가하여 중단함.')
+            return result
 
         prim = self._make_primitives(goal_handle)
         conditions = ['square_cw', 'square_ccw', 'strafe_square'] if test == 'full' else [test]
@@ -253,6 +264,12 @@ class OdomMclNode(Node):
             result.success = False
             result.message = f'안전 가드 발동: {e}'
             return result
+        except StartAlignmentBad as e:
+            prim.stop()
+            goal_handle.abort()
+            result.success = False
+            result.message = str(e)
+            return result
 
         prim.stop()
         e_pos, e_yaw = self._residual()   # feedback_source odom의 MCL 잔차(대표값)
@@ -269,12 +286,14 @@ class OdomMclNode(Node):
         stamp = time.strftime('%Y%m%d_%H%M%S')
         writer, fh = self._open_csv(cond, rep, stamp)
         # 시작 시점 정렬(문서 §7): odom(t)를 map 프레임으로 옮기는 고정 변환.
+        # 시작 정렬 품질이 전체 잔차의 기준이므로, 미달이면 실행 중단(success=false).
+        if not self._gt_quality_ok():
+            raise StartAlignmentBad(
+                f'[{cond}] 시작 시 MCL 품질 미달(공분산/신선도) — '
+                f'로컬라이제이션 수렴(저공분산) 후 재시도')
         start_gt = self._gt
         self._align_a = align_transform(start_gt, self._pose_a)
         self._align_b = align_transform(start_gt, self._pose_b)
-        if not self._gt_quality_ok():
-            self.get_logger().warn(
-                f'[{cond}] 시작 시 MCL 공분산/신선도 미달 — 정렬 기준 신뢰 낮음(품질 플래그 기록)')
         if self._record_tum:
             self._recorder.start(['odom_a', 'odom_b', 'mcl'])
         try:

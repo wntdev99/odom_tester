@@ -12,9 +12,9 @@
 품질 게이팅: quality_ok==0 인 체크포인트는 MCL 공분산/신선도 미달 구간이라
       잔차를 신뢰할 수 없다. 플롯에 별도 표시하고, 요약 통계는 통과분만으로 낸다.
 
-snap-back 주: 스캔 보정 사이 누적 odom 오차(급감폭)는 고주파 로깅이 있어야
-      정확히 보인다. 이 체크포인트 CSV(바퀴당 1점)로는 '바퀴당 잔차 증분'만
-      근사로 제공한다(진짜 snap-back 추출은 노드의 full-rate 로깅이 선행 필요).
+snap-back: 노드의 full-rate TUM(*_odom_a/b/mcl.tum)이 있으면 시간축 잔차를
+      복원해 스캔 보정 사이 누적 odom 오차(계단/급변)를 보여준다(compute_snapback).
+      체크포인트 CSV(바퀴당 1점)는 누적 잔차 envelope, TUM 은 그 안의 급변을 담당.
 
 ROS 의존성 없는 순수 파이썬(matplotlib) 스크립트.
 
@@ -296,6 +296,162 @@ def collect_inputs(input_path):
         return [], input_path
 
 
+# =====================================================================
+# snap-back 분석 (full-rate TUM 기반)
+# ---------------------------------------------------------------------
+# 노드가 남긴 연속 궤적 TUM(odom_a/odom_b/mcl)을 읽어, 시작정렬 후
+# odom(dead-reckoning) vs MCL 잔차를 '시간 축'으로 복원한다. 체크포인트
+# CSV(바퀴당 1점)와 달리, 스캔 보정 사이 잔차 변화(계단/급변 = snap-back)를
+# 보여준다. 잔차는 보정 때마다 계단식으로 뛰며, 각 계단 ≈ 그 구간 누적 odom 오차.
+# =====================================================================
+def _yaw_from_quat(qx, qy, qz, qw):
+    return math.atan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
+
+
+def parse_tum(path):
+    """TUM(`t x y z qx qy qz qw`) → 시간순 list[(t, x, y, yaw)]."""
+    samples = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            p = line.split()
+            if len(p) < 8:
+                continue
+            t, x, y = float(p[0]), float(p[1]), float(p[2])
+            qx, qy, qz, qw = float(p[4]), float(p[5]), float(p[6]), float(p[7])
+            samples.append((t, x, y, _yaw_from_quat(qx, qy, qz, qw)))
+    samples.sort(key=lambda s: s[0])
+    return samples
+
+
+def _nearest(series, times, t):
+    """시간 t 에 가장 가까운 샘플과 시간차를 반환. series 는 시간순, times 는 t 리스트."""
+    import bisect
+    i = bisect.bisect_left(times, t)
+    cands = []
+    if i < len(series):
+        cands.append(series[i])
+    if i > 0:
+        cands.append(series[i - 1])
+    best = min(cands, key=lambda s: abs(s[0] - t))
+    return best, abs(best[0] - t)
+
+
+def compute_snapback(odom, mcl, match_tol=0.1, snap_thresh=0.005):
+    """정렬된 odom 궤적 vs MCL 의 시간축 잔차 + snap(급변) 이벤트.
+
+    - 시작정렬: t0 의 odom·MCL 이 같은 물리 자세라 보고 odom→map 변환 T 고정.
+    - 각 odom 샘플에서 시간 최근접 MCL 과 잔차(pos[m], yaw[rad]) 계산(시간차 match_tol 이내).
+    - snap 이벤트: 연속 잔차 pos 변화 |Δ| > snap_thresh 를 보정 이벤트로 집계.
+    반환 dict: t(상대초), res_pos, res_yaw, events(인덱스), stats.
+    """
+    if len(odom) < 2 or len(mcl) < 2:
+        return None
+    mcl_times = [s[0] for s in mcl]
+    # 시작정렬 T = mcl0 ∘ inverse(odom0), odom0 시각에 최근접한 mcl 을 기준으로.
+    o0 = odom[0]
+    m0, dt0 = _nearest(mcl, mcl_times, o0[0])
+    T = _compose((m0[1], m0[2], m0[3]), _inverse((o0[1], o0[2], o0[3])))
+
+    t0 = o0[0]
+    ts, rpos, ryaw = [], [], []
+    for (t, x, y, yaw) in odom:
+        m, dt = _nearest(mcl, mcl_times, t)
+        if dt > match_tol:
+            continue
+        in_map = _compose(T, (x, y, yaw))
+        rp = math.hypot(in_map[0] - m[1], in_map[1] - m[2])
+        ry = math.atan2(math.sin(in_map[2] - m[3]), math.cos(in_map[2] - m[3]))
+        ts.append(t - t0)
+        rpos.append(rp)
+        ryaw.append(ry)
+    if len(rpos) < 2:
+        return None
+
+    # snap 이벤트: 잔차 pos 의 큰 연속 변화(보정으로 인한 계단/급변)
+    events, jumps = [], []
+    for i in range(1, len(rpos)):
+        d = rpos[i] - rpos[i - 1]
+        if abs(d) > snap_thresh:
+            events.append(i)
+            jumps.append(d)
+
+    stats = {
+        "n": len(rpos),
+        "max_pos": max(rpos),
+        "mean_pos": sum(rpos) / len(rpos),
+        "final_pos": rpos[-1],
+        "max_yaw_deg": math.degrees(max(ryaw, key=abs)),
+        "n_events": len(events),
+        "mean_jump": (sum(abs(j) for j in jumps) / len(jumps)) if jumps else 0.0,
+        "max_jump": (max(abs(j) for j in jumps)) if jumps else 0.0,
+    }
+    return {"t": ts, "res_pos": rpos, "res_yaw": ryaw,
+            "events": events, "stats": stats}
+
+
+def plot_snapback(run_name, a_path, b_path, mcl_path, outdir, snap_thresh):
+    """A/B 각각의 시간축 잔차(snap-back)를 그린다. 반환: (저장경로|None, 요약문|None)."""
+    mcl = parse_tum(mcl_path)
+    series = {}
+    for tag, path in (("A swerve", a_path), ("B fused", b_path)):
+        if not os.path.isfile(path):
+            continue
+        odom = parse_tum(path)
+        sb = compute_snapback(odom, mcl, snap_thresh=snap_thresh)
+        if sb:
+            series[tag] = sb
+    if not series:
+        return None, None
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+    colors = {"A swerve": "tab:green", "B fused": "tab:purple"}
+    for tag, sb in series.items():
+        ax1.plot(sb["t"], sb["res_pos"], color=colors[tag], lw=1.0, label=tag)
+        # snap 이벤트 표시
+        ev_t = [sb["t"][i] for i in sb["events"]]
+        ev_v = [sb["res_pos"][i] for i in sb["events"]]
+        ax1.scatter(ev_t, ev_v, color="red", marker="x", s=25, zorder=5)
+        ax2.plot(sb["t"], rad2deg_list(sb["res_yaw"]), color=colors[tag],
+                 lw=1.0, label=tag)
+    ax1.set_ylabel("MCL 잔차 pos [m]")
+    ax1.set_title(f"{run_name} — snap-back (시간축 잔차, 빨간 X=보정 급변)")
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(fontsize=8)
+    ax2.set_ylabel("MCL 잔차 yaw [deg]")
+    ax2.set_xlabel("시간 [s] (조건 시작 기준)")
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(fontsize=8)
+    fig.tight_layout()
+    path = os.path.join(outdir, f"{run_name}_snapback.png")
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
+
+    lines = [f"[{run_name}] snap-back:"]
+    for tag, sb in series.items():
+        s = sb["stats"]
+        lines.append(
+            f"  [{tag}] 최대 잔차 pos={s['max_pos']:.4f} m (mean {s['mean_pos']:.4f}), "
+            f"최종 {s['final_pos']:.4f} m, yaw|max|={s['max_yaw_deg']:.3f}°; "
+            f"보정 이벤트 {s['n_events']}회(평균 급변 {s['mean_jump']*1000:.2f} mm, "
+            f"최대 {s['max_jump']*1000:.2f} mm)")
+    return path, "\n".join(lines)
+
+
+def find_tum_sets(base_dir):
+    """base_dir 에서 (run_name, odom_a, odom_b, mcl) TUM 세트를 찾는다."""
+    sets = []
+    for mcl_path in sorted(glob.glob(os.path.join(base_dir, "*_mcl.tum"))):
+        prefix = mcl_path[:-len("_mcl.tum")]
+        a_path = prefix + "_odom_a.tum"
+        b_path = prefix + "_odom_b.tum"
+        if os.path.isfile(a_path) or os.path.isfile(b_path):
+            sets.append((os.path.basename(prefix), a_path, b_path, mcl_path))
+    return sets
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="방법 ④(odom_mcl) CSV MCL 잔차 분석·시각화")
@@ -303,48 +459,66 @@ def main():
                         help="CSV 파일 또는 디렉토리 (기본: results, CWD 기준)")
     parser.add_argument("--output", default=None,
                         help="PNG 저장 디렉토리 (기본: 입력 옆 plots/)")
+    parser.add_argument("--snap-drop", type=float, default=0.005,
+                        help="snap 이벤트로 볼 연속 잔차 변화 임계 [m] (기본 0.005)")
     args = parser.parse_args()
 
     setup_korean_font()
 
     files, base_dir = collect_inputs(args.input)
-    if not files:
-        print(f"[오류] CSV 를 찾지 못함: {args.input}", file=sys.stderr)
-        sys.exit(1)
+    # base_dir 이 유효한지(디렉토리 or 파일의 부모) 확인 — CSV·TUM 둘 다 없을 수 있음
+    if not os.path.isdir(base_dir):
+        base_dir = base_dir if os.path.isdir(base_dir) else \
+            (os.path.dirname(base_dir) or ".")
 
     outdir = os.path.expanduser(args.output) if args.output \
         else os.path.join(base_dir, "plots")
     os.makedirs(outdir, exist_ok=True)
 
-    print(f"입력 CSV {len(files)}개 처리, 출력 → {outdir}")
-
     datasets = []
     saved_all = []
-    for path in files:
-        name = os.path.splitext(os.path.basename(path))[0]
-        try:
-            data = load_csv(path)
-        except Exception as e:
-            print(f"[경고] {path} 읽기 실패: {e}", file=sys.stderr)
-            continue
-        if not data["loop"]:
-            print(f"[경고] {name}: 데이터 행 없음, 건너뜀", file=sys.stderr)
-            continue
-        datasets.append((name, data))
-        for p in plot_single(name, data, outdir):
-            saved_all.append(p)
-            print(f"  저장: {p}")
+    if files:
+        print(f"입력 CSV {len(files)}개 처리, 출력 → {outdir}")
+        for path in files:
+            name = os.path.splitext(os.path.basename(path))[0]
+            try:
+                data = load_csv(path)
+            except Exception as e:
+                print(f"[경고] {path} 읽기 실패: {e}", file=sys.stderr)
+                continue
+            if not data["loop"]:
+                print(f"[경고] {name}: 데이터 행 없음, 건너뜀", file=sys.stderr)
+                continue
+            datasets.append((name, data))
+            for p in plot_single(name, data, outdir):
+                saved_all.append(p)
+                print(f"  저장: {p}")
 
-    if not datasets:
-        print("[오류] 유효한 데이터가 없음", file=sys.stderr)
-        sys.exit(1)
+        comp = plot_comparison(datasets, outdir)
+        if comp:
+            saved_all.append(comp)
+            print(f"  저장(비교): {comp}")
+        if datasets:
+            print_summary(datasets)
+    else:
+        print(f"[정보] CSV 없음 — TUM snap-back 만 시도 (출력 → {outdir})")
 
-    comp = plot_comparison(datasets, outdir)
-    if comp:
-        saved_all.append(comp)
-        print(f"  저장(비교): {comp}")
-
-    print_summary(datasets)
+    # --- snap-back: full-rate TUM 세트가 있으면 시간축 잔차 분석 ---
+    tum_sets = find_tum_sets(base_dir)
+    if tum_sets:
+        print(f"\nfull-rate TUM {len(tum_sets)}세트 발견 → snap-back 분석")
+        for run_name, a_path, b_path, mcl_path in tum_sets:
+            sb_path, sb_summary = plot_snapback(
+                run_name, a_path, b_path, mcl_path, outdir, args.snap_drop)
+            if sb_path:
+                saved_all.append(sb_path)
+                print(f"  저장(snap-back): {sb_path}")
+                print(sb_summary)
+    else:
+        if not files:
+            print(f"[오류] CSV·TUM 둘 다 없음: {args.input}", file=sys.stderr)
+            sys.exit(1)
+        print("\n(full-rate TUM 없음 — snap-back 생략. 방법④ 노드가 *_odom_a/b/mcl.tum 생성)")
 
     print(f"\n총 {len(saved_all)}개 PNG 생성 완료.")
 

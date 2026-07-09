@@ -114,9 +114,13 @@ results/                     ← 실험 산출물 (gitignore, 커밋 안 됨)
     프레임 XY 오버레이. 합성 CSV로 end-to-end 검증됨.
   - [x] **full-rate 궤적 로깅**: `odom_test_core/recorder.py`(TrajectoryRecorder, TUM 저장) 추가,
     노드가 실행마다 시리즈별 `*.tum`(odom_a/odom_b/mcl) 저장(`record_tum` 파라미터). 유닛 검증됨.
-  - [ ] (선택) **진짜 snap-back 분석**: 이제 full-rate TUM 이 있으므로 보정 사이 누적 odom 오차
-    급감폭을 TUM 에서 추출하는 분석 추가 가능(analyze_method4 확장).
-  - [ ] **`/mcl_pose` 실제 토픽·타입 확인**(읽기 전용 조회) 후 `method4.yaml`의 `gt_topic`/`gt_type` 확정.
+  - [x] **snap-back 분석**: `analyze_method4.py`가 full-rate TUM(odom_a/b/mcl)에서 시작정렬 후
+    시간축 잔차를 복원 — 보정 사이 누적 odom 오차(계단/급변)·최대/평균 잔차·보정 이벤트 집계.
+    CSV 없이 TUM만으로도 동작. 합성 TUM으로 end-to-end 검증됨(`--snap-drop` 임계).
+  - [x] **시작 정렬 품질 게이트**: 조건 시작 시 MCL 공분산/신선도 미달이면 노드가 **액션
+    success=false**로 중단(`StartAlignmentBad`). 시작 정렬이 전체 잔차의 기준이므로 fail-fast.
+  - [x] **`/mcl_pose` 실제 토픽·타입 확인**(읽기 전용): 존재, `geometry_msgs/PoseWithCovarianceStamped`
+    → `method4.yaml`의 `gt_topic=/mcl_pose, gt_type=pose_with_cov`와 일치(확정).
 - [ ] **방법 ② `odom_umbmark` 패키지 생성**: 코어 명령기 재사용. `umbmark_cw/ccw` 러너, **테이프 실측 입력**(CLI/CSV), UMBmark 분석기(무게중심, `E_max,syst`, Type A/B 분해 → 보정계수). `loops=1, repeats=5` 양방향. `/method2` 네임스페이스, 같은 info/run 인터페이스.
 - [ ] **방법 ③ `odom_apriltag_gt` 패키지 생성**: `christianrauch/apriltag_ros`(`apt install ros-jazzy-apriltag-ros`), `tag36h11`, 바닥 기준 태그(월드 원점), `image_proc` rectify, intrinsic 캘리브레이션. GT pose 발행 + rosbag + evo(ATE/RPE) 어댑터. `/method3`.
 - [x] **evo 연동**: 노드가 TUM 저장(위 full-rate 로깅) + `scripts/run_evo.py`(TUM 세트 자동
