@@ -100,7 +100,9 @@ results/                     ← 실험 산출물 (gitignore, 커밋 안 됨)
 ## 7. 남은 작업 (TODO)
 
 ### 개발 (다른 에이전트 담당 — 오프라인)
-- [ ] **방법 ① 분석 강화**: 조건별(cw/ccw/strafe) 비교, 폐루프 잔차(자기 odom) 분리 표기, 통계 요약 리포트.
+- [x] **방법 ① 분석 강화**(`analyze_method1.py`): 자기 odom **폐루프 비폐합(핀휠)을 상호 드리프트와
+  분리** 표기(플롯+통계), CW/CCW 부호 비교(상호+비폐합 yaw), 마크다운 요약 리포트(`summary_method1.md`).
+  합성 CSV로 end-to-end 검증됨.
 - [x] **방법 ④ `odom_mcl` 패키지 생성**: `/method4`, MCL(`/mcl_pose`) 기준 잔차. 코어 재사용,
   SE(2) 시작정렬(`pose_utils.compose/inverse/align_transform`), 공분산 게이팅, gt_topic/gt_type 파라미터화.
   - [x] `scripts/analyze_method4.py`: 잔차 곡선(A/B, pos/yaw)·품질 게이팅 표시·바퀴당 증가율·map

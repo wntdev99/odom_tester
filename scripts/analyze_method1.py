@@ -95,6 +95,68 @@ def linear_slope(xs, ys):
     return num / denom
 
 
+def classify(name):
+    """CSV 파일명에서 조건 종류 추정: cw | ccw | strafe | unknown.
+
+    'square_ccw' 는 'cw' 를 부분문자열로 포함하므로 ccw 를 먼저 검사한다."""
+    low = name.lower()
+    if "ccw" in low:
+        return "ccw"
+    if "cw" in low:
+        return "cw"
+    if "strafe" in low:
+        return "strafe"
+    return "unknown"
+
+
+def compute_nonclosure(data):
+    """자기-odom 폐루프 비폐합(핀휠) — 상호 드리프트와 별개.
+
+    CSV 의 (ax,ay,ayaw)/(bx,by,byaw) 는 조건 시작 시점 재영점된 각 추정기의 위치·헤딩.
+    정사각형/strafe 경로는 매 loop 완주 시 시작점(0,0,0)으로 돌아와야 하므로,
+    원점으로부터의 편차 = 그 추정기가 '자기 믿음 안에서' 경로를 못 닫은 정도(비폐합).
+    이는 두 추정기 간 drift(mutual)와 성격이 다르다(자기일관성 vs 상호일치).
+
+    반환: dict(swerve_pos[], swerve_yaw_deg[], fused_pos[], fused_yaw_deg[])."""
+    sp = [math.hypot(x, y) for x, y in zip(data["ax"], data["ay"])]
+    fp = [math.hypot(x, y) for x, y in zip(data["bx"], data["by"])]
+    syaw = rad2deg_list(data["ayaw"])
+    fyaw = rad2deg_list(data["byaw"])
+    return {"swerve_pos": sp, "swerve_yaw_deg": syaw,
+            "fused_pos": fp, "fused_yaw_deg": fyaw}
+
+
+def plot_nonclosure(name, data, outdir):
+    """자기-odom 비폐합(핀휠)을 swerve·fused 각각 pos·yaw 로 시각화."""
+    loops = data["loop"]
+    nc = compute_nonclosure(data)
+
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8), sharex=True)
+    ax1.plot(loops, nc["swerve_pos"], marker="o", color="tab:green",
+             label="swerve (a)")
+    ax1.plot(loops, nc["fused_pos"], marker="s", color="tab:purple",
+             label="fused (b)")
+    ax1.set_ylabel("비폐합 pos [m] (원점 이탈)")
+    ax1.set_title(f"{name} — 자기 odom 폐루프 비폐합(핀휠), 상호 드리프트와 별개")
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(fontsize=8)
+
+    ax2.plot(loops, nc["swerve_yaw_deg"], marker="o", color="tab:green",
+             label="swerve (a)")
+    ax2.plot(loops, nc["fused_yaw_deg"], marker="s", color="tab:purple",
+             label="fused (b)")
+    ax2.set_ylabel("비폐합 yaw [deg]")
+    ax2.set_xlabel("loop (바퀴 체크포인트)")
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(fontsize=8)
+
+    fig.tight_layout()
+    p = os.path.join(outdir, f"{name}_nonclosure.png")
+    fig.savefig(p, dpi=120)
+    plt.close(fig)
+    return p
+
+
 def plot_single(name, data, outdir):
     """조건(CSV) 1개에 대한 drift 라인 플롯 + XY 오버레이 PNG 생성.
 
@@ -181,33 +243,110 @@ def plot_comparison(datasets, outdir):
     return p
 
 
-def print_summary(datasets):
-    """조건별 최종 drift 와 바퀴당 증가율(선형 기울기) 콘솔 요약."""
-    print("\n" + "=" * 72)
-    print("방법 ① 드리프트 요약 (swerve↔fused 상호 불일치)")
-    print("=" * 72)
-    for name, data in datasets:
-        loops = data["loop"]
-        dpos = data["drift_pos"]
-        dyaw_deg = rad2deg_list(data["drift_yaw"])
-        n = len(loops)
-        final_pos = dpos[-1] if dpos else float("nan")
-        final_yaw = dyaw_deg[-1] if dyaw_deg else float("nan")
-        slope_pos = linear_slope(loops, dpos)
-        slope_yaw = linear_slope(loops, dyaw_deg)
+def summarize_one(name, data):
+    """조건 1개의 통계 dict 계산(콘솔·리포트 공용)."""
+    loops = data["loop"]
+    dpos = data["drift_pos"]
+    dyaw_deg = rad2deg_list(data["drift_yaw"])
+    nc = compute_nonclosure(data)
+    return {
+        "name": name,
+        "kind": classify(name),
+        "n": len(loops),
+        "final_drift_pos": dpos[-1] if dpos else float("nan"),
+        "final_drift_yaw": dyaw_deg[-1] if dyaw_deg else float("nan"),
+        "slope_drift_pos": linear_slope(loops, dpos),
+        "slope_drift_yaw": linear_slope(loops, dyaw_deg),
+        "final_nc_swerve_pos": nc["swerve_pos"][-1] if nc["swerve_pos"] else float("nan"),
+        "final_nc_swerve_yaw": nc["swerve_yaw_deg"][-1] if nc["swerve_yaw_deg"] else float("nan"),
+        "final_nc_fused_pos": nc["fused_pos"][-1] if nc["fused_pos"] else float("nan"),
+        "final_nc_fused_yaw": nc["fused_yaw_deg"][-1] if nc["fused_yaw_deg"] else float("nan"),
+        "slope_nc_swerve_yaw": linear_slope(loops, nc["swerve_yaw_deg"]),
+        "slope_nc_swerve_pos": linear_slope(loops, nc["swerve_pos"]),
+    }
 
-        print(f"\n[{name}]  (체크포인트 {n}개)")
-        print(f"  최종 drift_pos : {final_pos:.6f} m")
-        print(f"  최종 drift_yaw : {final_yaw:.4f} deg")
-        if slope_pos is not None:
-            print(f"  바퀴당 증가율(pos) : {slope_pos:.6f} m/loop")
-        else:
-            print("  바퀴당 증가율(pos) : N/A (데이터 부족)")
-        if slope_yaw is not None:
-            print(f"  바퀴당 증가율(yaw) : {slope_yaw:.4f} deg/loop")
-        else:
-            print("  바퀴당 증가율(yaw) : N/A (데이터 부족)")
+
+def _sign_verdict(a, b, eps=1e-6):
+    """두 값의 부호 비교 → 해석 문구."""
+    if abs(a) < eps or abs(b) < eps:
+        return "한쪽≈0 — 판정 보류"
+    if (a > 0) != (b > 0):
+        return "부호 뒤집힘 → 회전 스케일성 비대칭(과/과소회전) 시사"
+    return "부호 동일 → 방향 독립 바이어스 시사"
+
+
+def cw_ccw_note(stats):
+    """CW/CCW 부호 비교(문서 §9). 상호 drift_yaw + 자기 비폐합 yaw 둘 다 비교.
+
+    이 로봇은 상호 drift 가 구조적으로 ≈0(공통 앵커)이라, 실질 신호는 비폐합 yaw 부호다."""
+    cw = next((s for s in stats if s["kind"] == "cw"), None)
+    ccw = next((s for s in stats if s["kind"] == "ccw"), None)
+    if not cw or not ccw:
+        return None
+    d_cw, d_ccw = cw["final_drift_yaw"], ccw["final_drift_yaw"]
+    n_cw, n_ccw = cw["final_nc_swerve_yaw"], ccw["final_nc_swerve_yaw"]
+    return (
+        f"상호 drift_yaw: CW={d_cw:+.4f}° CCW={d_ccw:+.4f}° → {_sign_verdict(d_cw, d_ccw)}; "
+        f"자기 비폐합 yaw(swerve): CW={n_cw:+.3f}° CCW={n_ccw:+.3f}° → {_sign_verdict(n_cw, n_ccw)} "
+        "(절대 판정은 방법 ②·③)")
+
+
+def print_summary(datasets):
+    """조건별 상호 드리프트 + 자기 비폐합 + CW/CCW 비교 콘솔 요약."""
+    stats = [summarize_one(name, data) for name, data in datasets]
+    print("\n" + "=" * 72)
+    print("방법 ① 요약 — (A) 상호 불일치(swerve↔fused)  (B) 자기 odom 비폐합(핀휠)")
     print("=" * 72)
+    for s in stats:
+        sp = f"{s['slope_drift_pos']:.6f} m/loop" if s["slope_drift_pos"] is not None else "N/A"
+        sy = f"{s['slope_drift_yaw']:.4f} deg/loop" if s["slope_drift_yaw"] is not None else "N/A"
+        ncy = (f"{s['slope_nc_swerve_yaw']:.4f} deg/loop"
+               if s["slope_nc_swerve_yaw"] is not None else "N/A")
+        print(f"\n[{s['name']}]  (kind={s['kind']}, 체크포인트 {s['n']}개)")
+        print(f"  (A) 상호 최종 pos={s['final_drift_pos']:.6f} m  "
+              f"yaw={s['final_drift_yaw']:.4f} deg  | 증가율 {sp}, {sy}")
+        print(f"  (B) 자기 비폐합  swerve pos={s['final_nc_swerve_pos']:.4f} m "
+              f"yaw={s['final_nc_swerve_yaw']:.3f}° | fused pos={s['final_nc_fused_pos']:.4f} m "
+              f"yaw={s['final_nc_fused_yaw']:.3f}° | swerve yaw 증가율 {ncy}")
+    note = cw_ccw_note(stats)
+    if note:
+        print(f"\n[CW/CCW] {note}")
+    print("=" * 72)
+    print("주: (A)는 절대정확도 아님(공통 EKF 앵커). (B) 핀휠이 실제 미회전인지 odom 오차인지는")
+    print("    GT(방법 ②·③)로만 구분. 실행 허용오차 아티팩트 가능성 병기.")
+    print("=" * 72)
+    return stats
+
+
+def write_report(stats, outdir):
+    """조건별 통계를 마크다운 리포트로 저장(리뷰·핸드오프용)."""
+    lines = []
+    lines.append("# 방법 ① 분석 요약 리포트\n")
+    lines.append("> (A) swerve↔fused **상호 불일치**(절대정확도 아님) / "
+                 "(B) 자기 odom **폐루프 비폐합(핀휠)**. 성격이 다른 두 지표를 분리한다.\n")
+    lines.append("\n## 조건별 통계\n")
+    lines.append("| 조건 | kind | 체크포인트 | 상호 pos [m] | 상호 yaw [°] | "
+                 "상호 yaw 증가율 [°/loop] | 비폐합 swerve pos [m] | 비폐합 swerve yaw [°] | "
+                 "비폐합 fused pos [m] | 비폐합 fused yaw [°] |")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|")
+    for s in stats:
+        sy = f"{s['slope_drift_yaw']:.4f}" if s["slope_drift_yaw"] is not None else "N/A"
+        lines.append(
+            f"| {s['name']} | {s['kind']} | {s['n']} | "
+            f"{s['final_drift_pos']:.6f} | {s['final_drift_yaw']:.4f} | {sy} | "
+            f"{s['final_nc_swerve_pos']:.4f} | {s['final_nc_swerve_yaw']:.3f} | "
+            f"{s['final_nc_fused_pos']:.4f} | {s['final_nc_fused_yaw']:.3f} |")
+    note = cw_ccw_note(stats)
+    if note:
+        lines.append(f"\n## CW/CCW 부호 비교\n\n- {note}\n")
+    lines.append("\n## 해석 경계\n")
+    lines.append("- (A) 상호 불일치는 공통 EKF yaw 앵커 탓 절대정확도를 못 잡는다(문서 §9).\n")
+    lines.append("- (B) 비폐합(핀휠)이 실제 미회전인지 odom 오차인지는 GT(방법 ②·③)로만 구분.\n")
+    lines.append("- 타이트 허용오차 재주행으로 실행 아티팩트 성분을 줄여 비교할 것.\n")
+    path = os.path.join(outdir, "summary_method1.md")
+    with open(path, "w") as f:
+        f.write("\n".join(lines) + "\n")
+    return path
 
 
 def collect_inputs(input_path):
@@ -263,6 +402,9 @@ def main():
         for p in plot_single(name, data, outdir):
             saved_all.append(p)
             print(f"  저장: {p}")
+        pnc = plot_nonclosure(name, data, outdir)
+        saved_all.append(pnc)
+        print(f"  저장(비폐합): {pnc}")
 
     if not datasets:
         print("[오류] 유효한 데이터가 없음", file=sys.stderr)
@@ -273,9 +415,11 @@ def main():
         saved_all.append(comp)
         print(f"  저장(비교): {comp}")
 
-    print_summary(datasets)
+    stats = print_summary(datasets)
+    report = write_report(stats, outdir)
+    print(f"  저장(리포트): {report}")
 
-    print(f"\n총 {len(saved_all)}개 PNG 생성 완료.")
+    print(f"\n총 {len(saved_all)}개 PNG + 리포트 1개 생성 완료.")
 
 
 if __name__ == "__main__":
